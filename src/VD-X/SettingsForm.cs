@@ -23,6 +23,7 @@ sealed class SettingsForm : Form
     readonly Dictionary<RouteMode, RadioButton> _routeModes = [];
     NumericUpDown _targetDesktop = null!;
     TextBox _exclude = null!;
+    DataGridView _rules = null!;
     // General tab
     CheckBox _autostart = null!;
     CheckBox _runAsAdmin = null!;
@@ -179,30 +180,8 @@ sealed class SettingsForm : Form
             "These programs are started when the app starts with Windows, and their windows are moved to the chosen desktop. Missing desktops are created. Windows that open later (e.g. the main window after a splash screen) are moved too, for a few minutes after the start. If the program is only a launcher (e.g. Battle.net games), enter the game's exe under “Window of”, e.g. Diablo IV.exe.",
             "Diese Programme werden gestartet, wenn die App mit Windows startet, und ihre Fenster landen auf dem gewählten Desktop. Fehlende Desktops werden angelegt. Auch Fenster, die erst später aufgehen (z. B. das Hauptfenster nach einem Startbildschirm), werden noch einige Minuten lang verschoben. Ist das Programm nur ein Launcher (z. B. Battle.net-Spiele), trage unter „Fenster von“ die Exe des Spiels ein, z. B. Diablo IV.exe.")));
 
-        _programs = new DataGridView
-        {
-            Width = ContentWidth,
-            Height = 240,
-            Margin = new Padding(0, 10, 0, 0),
-            AllowUserToAddRows = false,
-            AllowUserToResizeRows = false,
-            RowHeadersVisible = false,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = true,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            BackgroundColor = SystemColors.Window,
-            BorderStyle = BorderStyle.FixedSingle,
-            EditMode = DataGridViewEditMode.EditOnEnter,
-        };
-        var desktopColumn = new DataGridViewComboBoxColumn
-        {
-            HeaderText = "Desktop",
-            ValueType = typeof(int),
-            FillWeight = 12,
-            FlatStyle = FlatStyle.Flat,
-        };
-        desktopColumn.Items.AddRange(Enumerable.Range(1, MaxDesktop).Cast<object>().ToArray());
-        _programs.Columns.Add(desktopColumn);
+        _programs = Grid(240);
+        _programs.Columns.Add(DesktopColumn(12));
         _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Program", "Programm"), FillWeight = 44 });
         _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Arguments", "Argumente"), FillWeight = 20 });
         var windowColumn = new DataGridViewTextBoxColumn
@@ -226,7 +205,6 @@ sealed class SettingsForm : Form
             if (e.ColumnIndex == 4 && e.RowIndex >= 0 && BrowseForProgram() is string path)
                 _programs.Rows[e.RowIndex].Cells[1].Value = path;
         };
-        _programs.DataError += (_, e) => e.ThrowException = false;
         foreach (var program in _settings.StartupPrograms)
             _programs.Rows.Add(Math.Clamp(program.Desktop, 1, MaxDesktop), program.Path, program.Arguments, program.Window);
         panel.Controls.Add(_programs);
@@ -238,7 +216,8 @@ sealed class SettingsForm : Form
                 _programs.Rows.Add(2, path, "", "");
         }));
         Button battleNet = null!;
-        battleNet = DialogButton(L.T("Add Battle.net game…", "Battle.net-Spiel hinzufügen…"), () => ShowBattleNetGames(battleNet));
+        battleNet = DialogButton(L.T("Add Battle.net game…", "Battle.net-Spiel hinzufügen…"), () => ShowBattleNetGames(battleNet, forLaunch: true,
+            game => _programs.Rows.Add(2, BattleNet.ClientPath, BattleNet.LaunchArguments(game.LaunchCode!), game.InstallDir)));
         _toolTip.SetToolTip(battleNet, L.T(
             "Installed Blizzard games, started through the Battle.net client. A game exe started directly gets no server connection.",
             "Installierte Blizzard-Spiele, gestartet über den Battle.net-Client. Eine direkt gestartete Spiel-Exe bekommt keine Serververbindung."));
@@ -258,26 +237,31 @@ sealed class SettingsForm : Form
         return panel;
     }
 
-    /// <summary>Drop-down with the installed Battle.net games; each adds a row that starts the game through the client.</summary>
-    void ShowBattleNetGames(Button anchor)
+    /// <summary>
+    /// Drop-down with the installed Battle.net games. For launching, versions that share a launch code (WoW Classic)
+    /// are one entry and games without a known code are greyed out; for window rules, versions in one folder are one entry.
+    /// </summary>
+    void ShowBattleNetGames(Button anchor, bool forLaunch, Action<BattleNet.Game> add)
     {
         _battleNetMenu.Items.Clear();
-        if (!File.Exists(BattleNet.ClientPath))
+        if (forLaunch && !File.Exists(BattleNet.ClientPath))
             _battleNetMenu.Items.Add(L.T("Battle.net is not installed.", "Battle.net ist nicht installiert.")).Enabled = false;
         else
         {
-            var games = BattleNet.InstalledGames();
+            var games = forLaunch
+                ? BattleNet.MergeBy(BattleNet.InstalledGames(), g => g.LaunchCode ?? g.Uid, L.T(" (version selected in Battle.net)", " (im Client gewählte Version)"))
+                : BattleNet.MergeBy(BattleNet.InstalledGames(), g => g.InstallDir);
             if (games.Count == 0)
                 _battleNetMenu.Items.Add(L.T("No Battle.net games found.", "Keine Battle.net-Spiele gefunden.")).Enabled = false;
             foreach (var game in games)
             {
-                if (game.LaunchCode is null)
+                if (forLaunch && game.LaunchCode is null)
                 {
                     _battleNetMenu.Items.Add(game.Name + L.T(" (not supported yet)", " (noch nicht unterstützt)")).Enabled = false;
                     continue;
                 }
                 var item = _battleNetMenu.Items.Add(game.Name);
-                item.Click += (_, _) => _programs.Rows.Add(2, BattleNet.ClientPath, BattleNet.LaunchArguments(game.LaunchCode), game.InstallDir);
+                item.Click += (_, _) => add(game);
             }
         }
         _battleNetMenu.Show(anchor, new Point(0, anchor.Height));
@@ -310,6 +294,20 @@ sealed class SettingsForm : Form
             .ToList();
     }
 
+    List<WindowRule> ReadRules()
+    {
+        _rules.EndEdit();
+        return _rules.Rows.Cast<DataGridViewRow>()
+            .Select(row => new WindowRule
+            {
+                Desktop = row.Cells[0].Value is int desktop ? desktop : 1,
+                Program = (row.Cells[1].Value as string ?? "").Trim(),
+                Follow = row.Cells[2].Value is true,
+            })
+            .Where(rule => rule.Program.Length > 0)
+            .ToList();
+    }
+
     string? BrowseForProgram()
     {
         using var dialog = new OpenFileDialog
@@ -326,10 +324,42 @@ sealed class SettingsForm : Form
     {
         var panel = Column();
         panel.Controls.Add(Hint(L.T(
-            "Automatically move every newly opened window to one desktop – e.g. to keep a “work” desktop free of everything else.",
-            "Verschiebt jedes neu geöffnete Fenster automatisch auf einen bestimmten Desktop – z. B. damit ein „Arbeits“-Desktop frei von allem anderen bleibt.")));
+            "Moves windows to a fixed desktop as soon as they open – no matter who started the program, e.g. a game started from Battle.net.",
+            "Verschiebt Fenster auf einen festen Desktop, sobald sie aufgehen – egal, wer das Programm gestartet hat, z. B. ein Spiel aus Battle.net heraus.")));
 
         var options = _settings.NewWindows;
+
+        panel.Controls.Add(new Label { Text = L.T("Rules for specific programs", "Regeln für bestimmte Programme"), Font = _boldFont, AutoSize = true, Margin = new Padding(0, 14, 0, 0) });
+        panel.Controls.Add(Hint(L.T(
+            "Program: exe name (e.g. Diablo IV.exe) or install folder. “Switch” also takes you to that desktop; otherwise the window is moved in the background and you stay.",
+            "Programm: Exe-Name (z. B. Diablo IV.exe) oder Installationsordner. „Mitwechseln“ bringt dich mit auf den Desktop, sonst landet das Fenster im Hintergrund und du bleibst.")));
+        _rules = Grid(150);
+        _rules.Columns.Add(DesktopColumn(14));
+        _rules.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Program", "Programm"), FillWeight = 66 });
+        _rules.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = L.T("Switch", "Mitwechseln"), FillWeight = 20 });
+        foreach (var rule in options.Rules)
+            _rules.Rows.Add(Math.Clamp(rule.Desktop, 1, MaxDesktop), rule.Program, rule.Follow);
+        panel.Controls.Add(_rules);
+
+        var ruleButtons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+        ruleButtons.Controls.Add(DialogButton(L.T("Add program…", "Programm hinzufügen…"), () =>
+        {
+            if (BrowseForProgram() is string path)
+                _rules.Rows.Add(2, Path.GetFileName(path), true);
+        }));
+        Button ruleBattleNet = null!;
+        ruleBattleNet = DialogButton(L.T("Add Battle.net game…", "Battle.net-Spiel hinzufügen…"),
+            () => ShowBattleNetGames(ruleBattleNet, forLaunch: false, game => _rules.Rows.Add(2, game.InstallDir, true)));
+        _toolTip.SetToolTip(ruleBattleNet, L.T("Adds the game's install folder, so every version in it is covered.", "Trägt den Installationsordner des Spiels ein, damit jede Version darin erfasst wird."));
+        ruleButtons.Controls.Add(ruleBattleNet);
+        ruleButtons.Controls.Add(DialogButton(L.T("Remove", "Entfernen"), () =>
+        {
+            foreach (DataGridViewRow row in _rules.SelectedRows)
+                _rules.Rows.Remove(row);
+        }));
+        panel.Controls.Add(ruleButtons);
+
+        panel.Controls.Add(new Label { Text = L.T("All other new windows", "Alle anderen neuen Fenster"), Font = _boldFont, AutoSize = true, Margin = new Padding(0, 18, 0, 0) });
         AddRouteMode(panel, RouteMode.Off, L.T("Off", "Aus"), null);
         AddRouteMode(panel, RouteMode.Silent,
             L.T("Move new windows, I stay where I am", "Neue Fenster verschieben, ich bleibe wo ich bin"),
@@ -438,6 +468,7 @@ sealed class SettingsForm : Form
                 Mode = _routeModes.First(pair => pair.Value.Checked).Key,
                 TargetDesktop = (int)_targetDesktop.Value,
                 Exclude = _exclude.Lines.Select(line => line.Trim()).Where(line => line.Length > 0).ToList(),
+                Rules = ReadRules(),
             };
             _settings.RunAsAdmin = _runAsAdmin.Checked;
             _settings.Save();
@@ -480,6 +511,40 @@ sealed class SettingsForm : Form
         FlowDirection = FlowDirection.TopDown,
         WrapContents = false,
     };
+
+    static DataGridView Grid(int height)
+    {
+        var grid = new DataGridView
+        {
+            Width = ContentWidth,
+            Height = height,
+            Margin = new Padding(0, 10, 0, 0),
+            AllowUserToAddRows = false,
+            AllowUserToResizeRows = false,
+            RowHeadersVisible = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = true,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            BackgroundColor = SystemColors.Window,
+            BorderStyle = BorderStyle.FixedSingle,
+            EditMode = DataGridViewEditMode.EditOnEnter,
+        };
+        grid.DataError += (_, e) => e.ThrowException = false;
+        return grid;
+    }
+
+    static DataGridViewComboBoxColumn DesktopColumn(int fillWeight)
+    {
+        var column = new DataGridViewComboBoxColumn
+        {
+            HeaderText = "Desktop",
+            ValueType = typeof(int),
+            FillWeight = fillWeight,
+            FlatStyle = FlatStyle.Flat,
+        };
+        column.Items.AddRange(Enumerable.Range(1, MaxDesktop).Cast<object>().ToArray());
+        return column;
+    }
 
     static Label Hint(string text, int width = ContentWidth) => new()
     {

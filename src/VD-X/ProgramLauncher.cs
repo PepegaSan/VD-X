@@ -101,10 +101,9 @@ static class ProgramLauncher
     {
         readonly string _path;
         readonly int _target;
-        // "Window of": a folder (every exe below it counts, e.g. a game's install folder) or an exe name.
+        // "Window of": an exe name or a folder (every exe below it counts, e.g. a game's install folder), see ProgramMatch.
         // Empty = the started program itself. With an entry, the started program is only a launcher whose own windows stay put.
-        readonly string? _folder;
-        readonly string _exeName;
+        readonly string _window;
         readonly bool _byNameOnly;
         // Exes seen so far (the program, or whatever ran from the folder), to tell whether it is still alive.
         readonly HashSet<string> _exeNames = new(StringComparer.OrdinalIgnoreCase);
@@ -120,32 +119,16 @@ static class ProgramLauncher
             _path = path;
             _target = target;
             _byNameOnly = window.Length > 0;
-            if (window.Length > 0 && Directory.Exists(window))
-            {
-                _folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(window));
-                _exeName = "";
-            }
-            else
-            {
-                // "Diablo IV", "Diablo IV.exe" and a full path all become "Diablo IV.exe".
-                string name = Path.GetFileName(window);
-                _exeName = name.Length == 0 ? Path.GetFileName(path) : Path.HasExtension(name) ? name : name + ".exe";
-                _exeNames.Add(_exeName);
-            }
+            _window = ProgramMatch.Normalize(window.Length > 0 ? window : Path.GetFileName(path));
+            if (!ProgramMatch.IsFolder(_window))
+                _exeNames.Add(_window);
         }
 
-        /// <summary>What windows are matched by, for messages: the folder or the exe name.</summary>
-        public string WindowSource => _folder ?? _exeName;
+        /// <summary>What windows are matched by, for messages: the exe name or the folder.</summary>
+        public string WindowSource => _window;
 
         /// <summary>Whether a process running from this path is one whose windows belong to this launch.</summary>
-        public bool Owns(string processPath)
-        {
-            if (processPath.Length == 0)
-                return false;
-            if (_folder is not null)
-                return processPath.StartsWith(_folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-            return string.Equals(Path.GetFileName(processPath), _exeName, StringComparison.OrdinalIgnoreCase);
-        }
+        public bool Owns(string processPath) => ProgramMatch.Matches(_window, processPath);
 
         public void Start(string arguments)
         {

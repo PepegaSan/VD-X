@@ -92,4 +92,17 @@ sealed class NewWindowSettings
     public int TargetDesktop { get; set; } = 1;
     /// <summary>Exe names whose windows are left alone, e.g. "msedge.exe".</summary>
     public List<string> Exclude { get; set; } = [];
+    /// <summary>Per-program rules, checked before <see cref="Mode"/>; they apply even while it is off.</summary>
+    public List<WindowRule> Rules { get; set; } = [];
+}
+
+/// <summary>New windows of one program go to a fixed desktop, no matter who started it (e.g. a game started from Battle.net).</summary>
+sealed class WindowRule
+{
+    /// <summary>Exe name or install folder, see <see cref="ProgramMatch"/>.</summary>
+    public string Program { get; set; } = "";
+    /// <summary>1 = first desktop.</summary>
+    public int Desktop { get; set; } = 1;
+    /// <summary>Also switch to that desktop; otherwise the window is moved in the background.</summary>
+    public bool Follow { get; set; } = true;
 }

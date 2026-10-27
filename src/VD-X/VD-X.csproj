@@ -15,7 +15,7 @@
     <ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>
     <AssemblyName>VD-X</AssemblyName>
     <RootNamespace>VDX</RootNamespace>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Product>VD-X</Product>
     <Company>PepegaSan</Company>
   </PropertyGroup>

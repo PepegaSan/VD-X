@@ -53,7 +53,18 @@ static class BattleNet
 
     public static string LaunchArguments(string launchCode) => $"--exec=\"launch {launchCode}\"";
 
-    /// <summary>Installed Blizzard games, sorted by name.</summary>
+    /// <summary>Games that share a key (launch code, install folder) become one entry named after all of them.</summary>
+    public static List<Game> MergeBy(IEnumerable<Game> games, Func<Game, string> key, string suffix = "") =>
+        games
+            .GroupBy(key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Count() == 1 ? group.First() : group.First() with
+            {
+                Name = string.Join(" / ", group.Select(g => g.Name).OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)) + suffix,
+            })
+            .OrderBy(g => g.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+    /// <summary>Installed Blizzard games, one per Blizzard install id, sorted by name.</summary>
     public static List<Game> InstalledGames()
     {
         var games = new List<Game>();
@@ -79,16 +90,6 @@ static class BattleNet
                     LaunchCodes.GetValueOrDefault(uid.Groups[1].Value)));
             }
         }
-        // Versions that share a launch code (the WoW Classic family) become one entry, because Battle.net starts
-        // whichever of them is selected in the client.
-        return games
-            .GroupBy(g => g.LaunchCode ?? g.Uid, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.Count() == 1 ? group.First() : group.First() with
-            {
-                Name = string.Join(" / ", group.Select(g => g.Name).OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase))
-                    + L.T(" (version selected in Battle.net)", " (im Client gewählte Version)"),
-            })
-            .OrderBy(g => g.Name, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+        return games.OrderBy(g => g.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 }
