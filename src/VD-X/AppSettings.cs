@@ -72,6 +72,8 @@ sealed class StartupProgram
     public int Desktop { get; set; } = 1;
     public string Path { get; set; } = "";
     public string Arguments { get; set; } = "";
+    /// <summary>Exe name or install folder whose windows are moved when <see cref="Path"/> is only a launcher, e.g. "Diablo IV.exe". Empty = the started program.</summary>
+    public string Window { get; set; } = "";
 }
 
 enum RouteMode

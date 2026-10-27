@@ -72,7 +72,17 @@ sealed class TrayApp : ApplicationContext
             RunStartupPrograms();
     }
 
+    /// <summary>Registers the saved hotkeys and reports the ones Windows refused.</summary>
     void ApplyHotkeys()
+    {
+        RegisterHotkeys();
+        if (_failedHotkeys.Count > 0)
+            Notify(ToolTipIcon.Warning,
+                L.T("Already used by another program:\n", "Schon von einem anderen Programm belegt:\n") +
+                string.Join("\n", _failedHotkeys.Select(a => $"{_settings.GetHotkey(a)?.ToDisplayString()} – {HotkeyActions.Get(a).Title}")));
+    }
+
+    void RegisterHotkeys()
     {
         var wanted = HotkeyActions.All
             .Select(info => (info.Action, Hotkey: _settings.GetHotkey(info.Action)))
@@ -80,11 +90,13 @@ sealed class TrayApp : ApplicationContext
             .Select(x => (x.Action, x.Hotkey!.Value));
         _failedHotkeys = _hotkeys.Register(wanted);
         _tray.Text = $"{Program.AppName}\n" + L.T($"{_hotkeys.Count} hotkey(s) active", $"{_hotkeys.Count} Hotkey(s) aktiv");
+    }
 
-        if (_failedHotkeys.Count > 0)
-            Notify(ToolTipIcon.Warning,
-                L.T("Already used by another program:\n", "Schon von einem anderen Programm belegt:\n") +
-                string.Join("\n", _failedHotkeys.Select(a => $"{_settings.GetHotkey(a)?.ToDisplayString()} – {HotkeyActions.Get(a).Title}")));
+    /// <summary>Globally registered keys never reach a window, so they are released while the user records a new hotkey.</summary>
+    void PauseHotkeys()
+    {
+        _hotkeys.UnregisterAll();
+        _tray.Text = $"{Program.AppName}\n" + L.T("Hotkeys paused", "Hotkeys pausiert");
     }
 
     void OnHotkeyPressed(HotkeyAction action)
@@ -124,11 +136,17 @@ sealed class TrayApp : ApplicationContext
             return;
         }
 
-        // Globally registered keys never reach the window, so pause them while the user records new ones.
-        _hotkeys.UnregisterAll();
-        _tray.Text = $"{Program.AppName}\n" + L.T("Hotkeys paused", "Hotkeys pausiert");
-
         var form = new SettingsForm(_settings, _failedHotkeys);
+        // Hotkeys keep working while the window is open; only a focused hotkey field needs the keys for itself.
+        form.HotkeyRecordingChanged += recording =>
+        {
+            if (_exiting)
+                return;
+            if (recording)
+                PauseHotkeys();
+            else
+                RegisterHotkeys();
+        };
         form.FormClosed += (_, _) =>
         {
             _settingsForm = null;

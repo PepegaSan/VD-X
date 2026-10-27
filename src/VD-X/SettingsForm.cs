@@ -10,6 +10,7 @@ sealed class SettingsForm : Form
     readonly IReadOnlyCollection<HotkeyAction> _registrationFailures;
     readonly AutostartMode _initialAutostart = Autostart.CurrentMode;
     readonly ToolTip _toolTip = new();
+    readonly ContextMenuStrip _battleNetMenu = new();
     readonly Font _boldFont;
     readonly Font _headingFont;
 
@@ -79,12 +80,17 @@ sealed class SettingsForm : Form
 
     // ---------------------------------------------------------------- Hotkeys
 
+    /// <summary>True while a hotkey field has the focus (its next key press becomes the hotkey), false once it loses it.</summary>
+    public event Action<bool>? HotkeyRecordingChanged;
+
+    public bool IsRecordingHotkey => _rows.Values.Any(row => row.Box.IsRecording);
+
     Control BuildHotkeysTab()
     {
         var panel = Column();
         panel.Controls.Add(Hint(L.T(
-            "Click a field and press the key or key combination you want. Backspace or Delete removes it. While this window is open, all hotkeys are paused.",
-            "Klicke in ein Feld und drücke die gewünschte Taste oder Tastenkombination. Rücktaste oder Entf entfernt sie. Solange dieses Fenster offen ist, sind alle Hotkeys pausiert.")));
+            "Click a field and press the key or key combination you want. Backspace or Delete removes it. Hotkeys keep working while this window is open; they are only paused while a field is selected.",
+            "Klicke in ein Feld und drücke die gewünschte Taste oder Tastenkombination. Rücktaste oder Entf entfernt sie. Die Hotkeys funktionieren auch bei offenem Fenster; nur solange ein Feld ausgewählt ist, sind sie pausiert.")));
 
         var grid = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Margin = new Padding(0, 4, 0, 4) };
         for (int i = 0; i < 3; i++)
@@ -113,6 +119,7 @@ sealed class SettingsForm : Form
 
         var box = new HotkeyBox { Width = 150, Hotkey = _settings.GetHotkey(info.Action), Margin = new Padding(0, 8, 4, 0) };
         box.HotkeyChanged += (_, _) => ValidateHotkeys();
+        box.RecordingChanged += (_, _) => HotkeyRecordingChanged?.Invoke(IsRecordingHotkey);
 
         var clear = new Button { Text = "×", Width = 30, Height = box.Height + 2, Margin = new Padding(0, 7, 0, 0) };
         clear.Click += (_, _) => box.Hotkey = null;
@@ -169,8 +176,8 @@ sealed class SettingsForm : Form
     {
         var panel = Column();
         panel.Controls.Add(Hint(L.T(
-            "These programs are started when the app starts with Windows, and their windows are moved to the chosen desktop. Missing desktops are created.",
-            "Diese Programme werden gestartet, wenn die App mit Windows startet, und ihre Fenster landen auf dem gewählten Desktop. Fehlende Desktops werden angelegt.")));
+            "These programs are started when the app starts with Windows, and their windows are moved to the chosen desktop. Missing desktops are created. Windows that open later (e.g. the main window after a splash screen) are moved too, for a few minutes after the start. If the program is only a launcher (e.g. Battle.net games), enter the game's exe under “Window of”, e.g. Diablo IV.exe.",
+            "Diese Programme werden gestartet, wenn die App mit Windows startet, und ihre Fenster landen auf dem gewählten Desktop. Fehlende Desktops werden angelegt. Auch Fenster, die erst später aufgehen (z. B. das Hauptfenster nach einem Startbildschirm), werden noch einige Minuten lang verschoben. Ist das Programm nur ein Launcher (z. B. Battle.net-Spiele), trage unter „Fenster von“ die Exe des Spiels ein, z. B. Diablo IV.exe.")));
 
         _programs = new DataGridView
         {
@@ -191,13 +198,22 @@ sealed class SettingsForm : Form
         {
             HeaderText = "Desktop",
             ValueType = typeof(int),
-            FillWeight = 14,
+            FillWeight = 12,
             FlatStyle = FlatStyle.Flat,
         };
         desktopColumn.Items.AddRange(Enumerable.Range(1, MaxDesktop).Cast<object>().ToArray());
         _programs.Columns.Add(desktopColumn);
-        _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Program", "Programm"), FillWeight = 56 });
-        _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Arguments", "Argumente"), FillWeight = 24 });
+        _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Program", "Programm"), FillWeight = 44 });
+        _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Arguments", "Argumente"), FillWeight = 20 });
+        var windowColumn = new DataGridViewTextBoxColumn
+        {
+            HeaderText = L.T("Window of", "Fenster von"),
+            FillWeight = 18,
+            ToolTipText = L.T("Only if the program is just a launcher: the exe (e.g. Diablo IV.exe) or install folder whose windows go to the desktop",
+                              "Nur wenn das Programm bloß ein Launcher ist: die Exe (z. B. Diablo IV.exe) oder der Installationsordner, deren Fenster auf den Desktop sollen"),
+        };
+        windowColumn.HeaderCell.ToolTipText = windowColumn.ToolTipText;
+        _programs.Columns.Add(windowColumn);
         _programs.Columns.Add(new DataGridViewButtonColumn
         {
             Text = "…",
@@ -207,20 +223,26 @@ sealed class SettingsForm : Form
         });
         _programs.CellContentClick += (_, e) =>
         {
-            if (e.ColumnIndex == 3 && e.RowIndex >= 0 && BrowseForProgram() is string path)
+            if (e.ColumnIndex == 4 && e.RowIndex >= 0 && BrowseForProgram() is string path)
                 _programs.Rows[e.RowIndex].Cells[1].Value = path;
         };
         _programs.DataError += (_, e) => e.ThrowException = false;
         foreach (var program in _settings.StartupPrograms)
-            _programs.Rows.Add(Math.Clamp(program.Desktop, 1, MaxDesktop), program.Path, program.Arguments);
+            _programs.Rows.Add(Math.Clamp(program.Desktop, 1, MaxDesktop), program.Path, program.Arguments, program.Window);
         panel.Controls.Add(_programs);
 
         var buttons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
         buttons.Controls.Add(DialogButton(L.T("Add program…", "Programm hinzufügen…"), () =>
         {
             if (BrowseForProgram() is string path)
-                _programs.Rows.Add(2, path, "");
+                _programs.Rows.Add(2, path, "", "");
         }));
+        Button battleNet = null!;
+        battleNet = DialogButton(L.T("Add Battle.net game…", "Battle.net-Spiel hinzufügen…"), () => ShowBattleNetGames(battleNet));
+        _toolTip.SetToolTip(battleNet, L.T(
+            "Installed Blizzard games, started through the Battle.net client. A game exe started directly gets no server connection.",
+            "Installierte Blizzard-Spiele, gestartet über den Battle.net-Client. Eine direkt gestartete Spiel-Exe bekommt keine Serververbindung."));
+        buttons.Controls.Add(battleNet);
         buttons.Controls.Add(DialogButton(L.T("Remove", "Entfernen"), () =>
         {
             foreach (DataGridViewRow row in _programs.SelectedRows)
@@ -234,6 +256,31 @@ sealed class SettingsForm : Form
         _programsResult = Hint("");
         panel.Controls.Add(_programsResult);
         return panel;
+    }
+
+    /// <summary>Drop-down with the installed Battle.net games; each adds a row that starts the game through the client.</summary>
+    void ShowBattleNetGames(Button anchor)
+    {
+        _battleNetMenu.Items.Clear();
+        if (!File.Exists(BattleNet.ClientPath))
+            _battleNetMenu.Items.Add(L.T("Battle.net is not installed.", "Battle.net ist nicht installiert.")).Enabled = false;
+        else
+        {
+            var games = BattleNet.InstalledGames();
+            if (games.Count == 0)
+                _battleNetMenu.Items.Add(L.T("No Battle.net games found.", "Keine Battle.net-Spiele gefunden.")).Enabled = false;
+            foreach (var game in games)
+            {
+                if (game.LaunchCode is null)
+                {
+                    _battleNetMenu.Items.Add(game.Name + L.T(" (not supported yet)", " (noch nicht unterstützt)")).Enabled = false;
+                    continue;
+                }
+                var item = _battleNetMenu.Items.Add(game.Name);
+                item.Click += (_, _) => _programs.Rows.Add(2, BattleNet.ClientPath, BattleNet.LaunchArguments(game.LaunchCode), game.InstallDir);
+            }
+        }
+        _battleNetMenu.Show(anchor, new Point(0, anchor.Height));
     }
 
     async Task TestPrograms(Button test)
@@ -257,6 +304,7 @@ sealed class SettingsForm : Form
                 Desktop = row.Cells[0].Value is int desktop ? desktop : 1,
                 Path = (row.Cells[1].Value as string ?? "").Trim(),
                 Arguments = (row.Cells[2].Value as string ?? "").Trim(),
+                Window = (row.Cells[3].Value as string ?? "").Trim(),
             })
             .Where(program => program.Path.Length > 0)
             .ToList();
@@ -454,6 +502,7 @@ sealed class SettingsForm : Form
         if (disposing)
         {
             _toolTip.Dispose();
+            _battleNetMenu.Dispose();
             _boldFont.Dispose();
             _headingFont.Dispose();
         }

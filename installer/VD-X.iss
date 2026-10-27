@@ -4,7 +4,7 @@
 #define AppExe "VD-X.exe"
 #define PublishDir "..\publish"
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.1"
 #endif
 
 [Setup]

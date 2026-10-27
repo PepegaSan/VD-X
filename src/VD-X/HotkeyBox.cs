@@ -7,6 +7,12 @@ sealed class HotkeyBox : TextBox
 
     public event EventHandler? HotkeyChanged;
 
+    /// <summary>Raised whenever <see cref="IsRecording"/> changes.</summary>
+    public event EventHandler? RecordingChanged;
+
+    /// <summary>True while the box has the keyboard focus, i.e. the next key press becomes the new hotkey.</summary>
+    public bool IsRecording { get; private set; }
+
     public HotkeyBox()
     {
         ReadOnly = true;
@@ -68,10 +74,27 @@ sealed class HotkeyBox : TextBox
 
     protected override void OnKeyPress(KeyPressEventArgs e) => e.Handled = true;
 
+    // GotFocus/LostFocus (unlike Enter/Leave) also fire when the whole window is activated or deactivated,
+    // so recording ends as soon as the user switches to another program.
+    protected override void OnGotFocus(EventArgs e)
+    {
+        base.OnGotFocus(e);
+        SetRecording(true);
+    }
+
     protected override void OnLostFocus(EventArgs e)
     {
         base.OnLostFocus(e);
         UpdateText();
+        SetRecording(false);
+    }
+
+    void SetRecording(bool recording)
+    {
+        if (IsRecording == recording)
+            return;
+        IsRecording = recording;
+        RecordingChanged?.Invoke(this, EventArgs.Empty);
     }
 
     static HotkeyModifiers ToModifiers(Keys keyData)
