@@ -13,9 +13,6 @@ static class ProgramLauncher
     static readonly TimeSpan WatchTime = TimeSpan.FromMinutes(3);
     // …unless the program is already gone and nothing new has appeared for a while.
     static readonly TimeSpan SettleTime = TimeSpan.FromSeconds(10);
-    // Programs often activate a window right after it was moved, which makes Windows switch to that desktop;
-    // for this long after a move such a switch is undone so the user stays where they were.
-    static readonly TimeSpan StayGuardTime = TimeSpan.FromSeconds(10);
     static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
     static readonly List<Launch> Launching = [];
@@ -27,7 +24,7 @@ static class ProgramLauncher
     public static async Task<List<string>> RunAllAsync(IEnumerable<StartupProgram> programs)
     {
         var errors = new List<string>();
-        await Task.WhenAll(programs.Where(p => p.Path.Trim().Length > 0).Select(async program =>
+        await Task.WhenAll(programs.Where(p => p.Enabled && p.Path.Trim().Length > 0).Select(async program =>
         {
             try
             {
@@ -109,10 +106,10 @@ static class ProgramLauncher
         readonly HashSet<string> _exeNames = new(StringComparer.OrdinalIgnoreCase);
         // Windows that already existed before the start are never ours, whatever process they belong to.
         readonly HashSet<IntPtr> _known = NativeMethods.GetAppWindows().ToHashSet();
+        // Takes the user back when a window we moved away pulls them to the target desktop.
+        readonly StayGuard _guard;
         Process? _process;
         int? _processId;   // null if the shell handed the file to an already running app
-        int _stayOn = -1;  // desktop the user was on when one of our windows was moved away from it
-        DateTime _guardUntil;
 
         public Launch(string path, string window, int target)
         {
@@ -122,6 +119,7 @@ static class ProgramLauncher
             _window = ProgramMatch.Normalize(window.Length > 0 ? window : Path.GetFileName(path));
             if (!ProgramMatch.IsFolder(_window))
                 _exeNames.Add(_window);
+            _guard = new StayGuard(Vda.GetCurrentDesktopNumber, () => IsOurs(NativeMethods.GetForegroundWindow()), desktop => Vda.GoToDesktopNumber(desktop));
         }
 
         /// <summary>What windows are matched by, for messages: the exe name or the folder.</summary>
@@ -180,29 +178,11 @@ static class ProgramLauncher
                 {
                     any = true;
                     if (current != _target)
-                    {
-                        _stayOn = current;
-                        _guardUntil = DateTime.UtcNow + StayGuardTime;
-                    }
+                        _guard.Arm(current, _target);
                 }
             }
-            KeepUserOnTheirDesktop();
+            _guard.Check();
             return any;
-        }
-
-        // Shortly after a move, the program usually activates the moved window and Windows follows it
-        // to the target desktop; take the user back to where they were.
-        void KeepUserOnTheirDesktop()
-        {
-            if (_stayOn < 0)
-                return;
-            if (DateTime.UtcNow > _guardUntil)
-            {
-                _stayOn = -1;
-                return;
-            }
-            if (Vda.GetCurrentDesktopNumber() == _target && IsOurs(NativeMethods.GetForegroundWindow()))
-                Vda.GoToDesktopNumber(_stayOn);
         }
 
         // Match by process, or by exe name / folder for launchers that hand over to a second process.

@@ -8,8 +8,10 @@ sealed class TrayApp : ApplicationContext
     readonly BackgroundWindow _background = new();
     readonly NewWindowRouter _router;
     readonly NotifyIcon _tray;
-    readonly ToolStripMenuItem _autostartItem;
+    readonly ToolStripMenuItem _settingsItem;
     readonly ToolStripMenuItem _runProgramsItem;
+    readonly ToolStripMenuItem _autostartItem;
+    readonly ToolStripMenuItem _exitItem;
     SettingsForm? _settingsForm;
     List<HotkeyAction> _failedHotkeys = [];
     bool _exiting;
@@ -21,22 +23,24 @@ sealed class TrayApp : ApplicationContext
             TryRun(_settings.Save);
         TryRun(Autostart.Repair);
 
-        _autostartItem = new ToolStripMenuItem(L.T("Start with Windows", "Mit Windows starten"), null, (_, _) => ToggleAutostart());
-        _runProgramsItem = new ToolStripMenuItem(L.T("Start programs now", "Programme jetzt starten"), null, (_, _) => RunStartupPrograms());
-        var settingsItem = new ToolStripMenuItem(L.T("Settings…", "Einstellungen…"), null, (_, _) => ShowSettings());
-        settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
+        _settingsItem = new ToolStripMenuItem("", null, (_, _) => ShowSettings());
+        _settingsItem.Font = new Font(_settingsItem.Font, FontStyle.Bold);
+        _runProgramsItem = new ToolStripMenuItem("", null, (_, _) => RunStartupPrograms());
+        _autostartItem = new ToolStripMenuItem("", null, (_, _) => ToggleAutostart());
+        _exitItem = new ToolStripMenuItem("", null, (_, _) => ExitThread());
+        UpdateMenuTexts();
         var menu = new ContextMenuStrip();
         menu.Items.AddRange([
-            settingsItem,
+            _settingsItem,
             _runProgramsItem,
             _autostartItem,
             new ToolStripSeparator(),
-            new ToolStripMenuItem(L.T("Exit", "Beenden"), null, (_, _) => ExitThread()),
+            _exitItem,
         ]);
         menu.Opening += (_, _) =>
         {
             _autostartItem.Checked = Autostart.CurrentMode != AutostartMode.Off;
-            _runProgramsItem.Enabled = _settings.StartupPrograms.Count > 0;
+            _runProgramsItem.Enabled = _settings.StartupPrograms.Any(p => p.Enabled);
         };
 
         _tray = new NotifyIcon
@@ -70,6 +74,15 @@ sealed class TrayApp : ApplicationContext
 
         if (startedByAutostart)
             RunStartupPrograms();
+    }
+
+    /// <summary>Set here rather than once, so a language change in the settings shows right away.</summary>
+    void UpdateMenuTexts()
+    {
+        _settingsItem.Text = L.T("Settings…", "Einstellungen…");
+        _runProgramsItem.Text = L.T("Start programs now", "Programme jetzt starten");
+        _autostartItem.Text = L.T("Start with Windows", "Mit Windows starten");
+        _exitItem.Text = L.T("Exit", "Beenden");
     }
 
     /// <summary>Registers the saved hotkeys and reports the ones Windows refused.</summary>
@@ -160,6 +173,7 @@ sealed class TrayApp : ApplicationContext
                 return;
             }
             ApplyHotkeys();
+            UpdateMenuTexts();   // the language may have changed
         };
         _settingsForm = form;
         form.Show();

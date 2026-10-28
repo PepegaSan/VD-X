@@ -27,6 +27,7 @@ sealed class SettingsForm : Form
     // General tab
     CheckBox _autostart = null!;
     CheckBox _runAsAdmin = null!;
+    ComboBox _language = null!;
 
     readonly Button _save;
 
@@ -177,11 +178,11 @@ sealed class SettingsForm : Form
     {
         var panel = Column();
         panel.Controls.Add(Hint(L.T(
-            "These programs are started when the app starts with Windows, and their windows are moved to the chosen desktop. Missing desktops are created. Windows that open later (e.g. the main window after a splash screen) are moved too, for a few minutes after the start. If the program is only a launcher (e.g. Battle.net games), enter the game's exe under “Window of”, e.g. Diablo IV.exe.",
-            "Diese Programme werden gestartet, wenn die App mit Windows startet, und ihre Fenster landen auf dem gewählten Desktop. Fehlende Desktops werden angelegt. Auch Fenster, die erst später aufgehen (z. B. das Hauptfenster nach einem Startbildschirm), werden noch einige Minuten lang verschoben. Ist das Programm nur ein Launcher (z. B. Battle.net-Spiele), trage unter „Fenster von“ die Exe des Spiels ein, z. B. Diablo IV.exe.")));
+            "These programs are started when the app starts with Windows, and their windows are moved to the chosen desktop. Missing desktops are created. “Off” in the Desktop column keeps an entry in the list without starting it. Windows that open later (e.g. the main window after a splash screen) are moved too, for a few minutes after the start. If the program is only a launcher (e.g. Battle.net games), enter the game's exe under “Window of”, e.g. Diablo IV.exe.",
+            "Diese Programme werden gestartet, wenn die App mit Windows startet, und ihre Fenster landen auf dem gewählten Desktop. Fehlende Desktops werden angelegt. „Aus“ in der Spalte Desktop lässt einen Eintrag in der Liste stehen, ohne ihn zu starten. Auch Fenster, die erst später aufgehen (z. B. das Hauptfenster nach einem Startbildschirm), werden noch einige Minuten lang verschoben. Ist das Programm nur ein Launcher (z. B. Battle.net-Spiele), trage unter „Fenster von“ die Exe des Spiels ein, z. B. Diablo IV.exe.")));
 
         _programs = Grid(240);
-        _programs.Columns.Add(DesktopColumn(12));
+        _programs.Columns.Add(DesktopColumn(12, offText: L.T("Off", "Aus")));
         _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Program", "Programm"), FillWeight = 44 });
         _programs.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = L.T("Arguments", "Argumente"), FillWeight = 20 });
         var windowColumn = new DataGridViewTextBoxColumn
@@ -206,7 +207,7 @@ sealed class SettingsForm : Form
                 _programs.Rows[e.RowIndex].Cells[1].Value = path;
         };
         foreach (var program in _settings.StartupPrograms)
-            _programs.Rows.Add(Math.Clamp(program.Desktop, 1, MaxDesktop), program.Path, program.Arguments, program.Window);
+            _programs.Rows.Add(Math.Clamp(program.Desktop, 0, MaxDesktop), program.Path, program.Arguments, program.Window);
         panel.Controls.Add(_programs);
 
         var buttons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
@@ -443,6 +444,14 @@ sealed class SettingsForm : Form
             "Needed to move or pin windows of programs that themselves run as administrator (e.g. Task Manager). Windows asks for permission once (UAC); autostart then uses Task Scheduler and starts without asking.",
             "Nötig, um Fenster von Programmen zu verschieben oder anzuheften, die selbst als Administrator laufen (z. B. Task-Manager). Windows fragt einmal nach (UAC); der Autostart läuft dann über die Aufgabenplanung und startet ohne Nachfrage.")));
 
+        var language = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 16, 0, 0) };
+        language.Controls.Add(new Label { Text = L.T("Language:", "Sprache:"), AutoSize = true, Margin = new Padding(0, 5, 6, 0) });
+        _language = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
+        _language.Items.AddRange(["English", "Deutsch"]);   // same order as the Language enum
+        _language.SelectedIndex = (int)_settings.Language;
+        language.Controls.Add(_language);
+        panel.Controls.Add(language);
+
         panel.Controls.Add(new Label { Text = "Info", Font = _headingFont, AutoSize = true, Margin = new Padding(0, 24, 0, 0) });
         int desktops = Vda.GetDesktopCount();
         panel.Controls.Add(Hint(
@@ -471,7 +480,9 @@ sealed class SettingsForm : Form
                 Rules = ReadRules(),
             };
             _settings.RunAsAdmin = _runAsAdmin.Checked;
+            _settings.Language = (Language)_language.SelectedIndex;
             _settings.Save();
+            L.Language = _settings.Language;
 
             var autostart = !_autostart.Checked ? AutostartMode.Off
                 : _runAsAdmin.Checked ? AutostartMode.Admin
@@ -533,18 +544,25 @@ sealed class SettingsForm : Form
         return grid;
     }
 
-    static DataGridViewComboBoxColumn DesktopColumn(int fillWeight)
+    /// <param name="offText">If given, a first entry with the value 0 that switches the row off without removing it.</param>
+    internal static DataGridViewComboBoxColumn DesktopColumn(int fillWeight, string? offText = null)
     {
-        var column = new DataGridViewComboBoxColumn
+        var choices = Enumerable.Range(1, MaxDesktop).Select(n => new DesktopChoice(n.ToString(), n)).ToList();
+        if (offText is not null)
+            choices.Insert(0, new DesktopChoice(offText, 0));
+        return new DataGridViewComboBoxColumn
         {
             HeaderText = "Desktop",
             ValueType = typeof(int),
             FillWeight = fillWeight,
             FlatStyle = FlatStyle.Flat,
+            DataSource = choices,
+            DisplayMember = nameof(DesktopChoice.Text),
+            ValueMember = nameof(DesktopChoice.Value),
         };
-        column.Items.AddRange(Enumerable.Range(1, MaxDesktop).Cast<object>().ToArray());
-        return column;
     }
+
+    sealed record DesktopChoice(string Text, int Value);
 
     static Label Hint(string text, int width = ContentWidth) => new()
     {

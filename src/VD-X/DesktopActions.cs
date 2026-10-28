@@ -39,9 +39,12 @@ static class DesktopActions
         return count < 1 ? 0 : ((desktopNumber % count) + count) % count;
     }
 
-    static void GoTo(int desktopNumber) =>
+    static void GoTo(int desktopNumber)
+    {
         Check(Vda.GoToDesktopNumber(desktopNumber),
             L.T($"Could not switch to desktop {desktopNumber + 1}.", $"Konnte nicht zu Desktop {desktopNumber + 1} wechseln."));
+        StayGuard.NoteUserSwitch(desktopNumber);
+    }
 
     static void CreateDesktopAndGo()
     {

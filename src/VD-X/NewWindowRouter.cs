@@ -5,9 +5,6 @@ sealed class NewWindowRouter(AppSettings settings)
 {
     // Give the window a moment to finish appearing; moving it immediately can fail.
     const int DelayMs = 150;
-    // Programs often activate a window right after it was moved, which makes Windows switch to that desktop;
-    // for this long after a background move such a switch is undone so the user stays where they were.
-    static readonly TimeSpan StayGuardTime = TimeSpan.FromSeconds(10);
 
     public event Action<string>? Error;
 
@@ -71,12 +68,14 @@ sealed class NewWindowRouter(AppSettings settings)
     // The program usually activates the moved window and Windows follows it to the target desktop; take the user back.
     static async Task KeepUserOnAsync(int desktop, int target, int processId)
     {
-        var until = DateTime.UtcNow + StayGuardTime;
-        while (DateTime.UtcNow < until)
+        var guard = new StayGuard(Vda.GetCurrentDesktopNumber,
+            () => NativeMethods.GetWindowProcessId(NativeMethods.GetForegroundWindow()) == processId,
+            d => Vda.GoToDesktopNumber(d));
+        guard.Arm(desktop, target);
+        while (guard.IsArmed)
         {
             await Task.Delay(250);
-            if (Vda.GetCurrentDesktopNumber() == target && NativeMethods.GetWindowProcessId(NativeMethods.GetForegroundWindow()) == processId)
-                Vda.GoToDesktopNumber(desktop);
+            guard.Check();
         }
     }
 

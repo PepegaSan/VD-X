@@ -28,6 +28,9 @@ sealed class AppSettings
     /// <summary>Run elevated so windows of elevated programs can be moved and pinned too.</summary>
     public bool RunAsAdmin { get; set; }
 
+    /// <summary>UI language; English until the user picks another one.</summary>
+    public Language Language { get; set; } = Language.English;
+
     public static AppSettings Load(out bool firstRun)
     {
         firstRun = !File.Exists(FilePath);
@@ -68,8 +71,10 @@ sealed class AppSettings
 
 sealed class StartupProgram
 {
-    /// <summary>1 = first desktop.</summary>
+    /// <summary>1 = first desktop; 0 = switched off ("Off" in the list: kept, but not started).</summary>
     public int Desktop { get; set; } = 1;
+    [JsonIgnore]
+    public bool Enabled => Desktop > 0;
     public string Path { get; set; } = "";
     public string Arguments { get; set; } = "";
     /// <summary>Exe name or install folder whose windows are moved when <see cref="Path"/> is only a launcher, e.g. "Diablo IV.exe". Empty = the started program.</summary>

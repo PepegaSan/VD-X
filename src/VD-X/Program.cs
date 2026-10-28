@@ -42,6 +42,7 @@ static class Program
             }
 
             var settings = AppSettings.Load(out bool firstRun);
+            L.Language = settings.Language;
             if (settings.RunAsAdmin && !Elevation.IsElevated && !restarted && Elevation.TryRestartElevated())
                 return 0;   // the elevated copy takes over as soon as we release the mutex
 

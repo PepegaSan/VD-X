@@ -1,11 +1,15 @@
-using System.Globalization;
-
 namespace VDX;
 
-/// <summary>Tiny two-language helper: German UI on German Windows, English everywhere else.</summary>
+enum Language
+{
+    English,
+    German,
+}
+
+/// <summary>Tiny two-language helper: English unless German is chosen in the settings.</summary>
 static class L
 {
-    static readonly bool German = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de";
+    public static Language Language { get; set; } = Language.English;
 
-    public static string T(string english, string german) => German ? german : english;
+    public static string T(string english, string german) => Language == Language.German ? german : english;
 }

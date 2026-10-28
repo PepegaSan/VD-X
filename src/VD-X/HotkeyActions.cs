@@ -16,7 +16,8 @@ sealed record HotkeyActionInfo(HotkeyAction Action, string Title, string Descrip
 /// <summary>Everything a hotkey can do, in the order shown in the settings window. Defaults: F14–F17.</summary>
 static class HotkeyActions
 {
-    public static IReadOnlyList<HotkeyActionInfo> All { get; } =
+    // Built on every call, so the titles follow the language setting.
+    public static IReadOnlyList<HotkeyActionInfo> All =>
     [
         new(HotkeyAction.NextDesktop,
             L.T("Next desktop", "Nächster Desktop"),
